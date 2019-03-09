@@ -4,6 +4,13 @@ import * as os from 'os'
 import { isCallsignSSID, isCallsign, isSSID } from './utils'
 import { Keystore } from './Keystore' 
 
+export enum TNCConnectionType {
+    Diagnostic = "Diagnostic",
+    KissSerial = "Serial",
+    KissNetwork = "Network",
+    Test = "Test"
+}
+
 export interface Config {
     readonly version: number,
     callsign: string,
@@ -12,6 +19,8 @@ export interface Config {
     kissPort: string,
     kissBaud: number,
     feedbackDebounce: number,
+    kissHost: string;
+    tncConnectionType: TNCConnectionType;
     signingKey?: string,
 }
 
@@ -27,6 +36,8 @@ export const defaultConfig: Config = {
     kissPort: '/tmp/kisstnc',
     kissBaud: 9600,
     feedbackDebounce: 20 * 1000,
+    kissHost: '127.0.0.1',
+    tncConnectionType: TNCConnectionType.KissSerial
 }
 
 /** Save a config file as JSON

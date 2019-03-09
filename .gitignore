@@ -3,3 +3,6 @@ build/
 pkg/
 .vscode/
 coverage/
+.DS_Store
+.idea
+

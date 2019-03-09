@@ -1,14 +1,14 @@
-import KISS_TNC from 'kiss-tnc'
-import { EventEmitter } from 'events'
-import { Keystore } from './Keystore.js'
-import { Packet, Station } from './Packet.js'
-import { Config } from './config.js'
-import { callsignSSIDToStation, timeout } from './utils.js'
-import { md5 } from './utils.js'
+import {EventEmitter} from 'events'
+import {Keystore} from './Keystore.js'
+import {Packet, Station} from './Packet.js'
+import {Config} from './config.js'
+import {callsignSSIDToStation, md5, timeout} from './utils.js'
+import {TNCConnectionFactory} from "./tnc/TNCConnectionFactory";
+import {TNCConnection} from "./tnc/TNCConnection";
 
 export interface MessageEvent {
-    to: Station 
-    from: Station 
+    to: Station
+    from: Station
     message: string
     verification: Verification,
     ax25Buffer?: Buffer
@@ -22,11 +22,10 @@ export enum Verification {
 }
 
 export class Messenger extends EventEmitter {
-
     private ks: Keystore
-    private tnc: any
     private config: Config
     private recentlySent = new Map<string, number>()
+    private tncConnection: TNCConnection;
 
     constructor(config: Config) {
         super()
@@ -36,34 +35,25 @@ export class Messenger extends EventEmitter {
             this.ks.genKeyPair(config.callsign)
         }
 
-        // device, baud_rate
-        this.tnc = this._createTNC(config.kissPort, config.kissBaud)
+        // Build instance of TNC communication handler
+        this.tncConnection = TNCConnectionFactory.createTNCConnection(config);
     }
 
     openTNC(): Promise<void> {
-        return new Promise((resolve, reject) => {
-            if (this.tnc == null) {
-                this.tnc = this._createTNC(this.config.kissPort, this.config.kissBaud)
-            }
-
-            this.tnc.open((err: any) => {
-                this.emit('open', err)
-                if (err) reject(err)
-                else resolve()
-            })
-        })
+        return this.tncConnection.openConnection(
+            (data: Buffer) => {this._onAX25DataRecieved(data)},
+            (error: any) => { this.emit('tnc-error', error)}
+            );
     }
 
     closeTNC(): void {
-        this.tnc.close()
-        this.tnc = null
-        this.emit('close')
+        this.tncConnection.closeConnection();
     }
 
     async send(to: string | Station, message: string, sign: boolean) {
         if (typeof to === 'string') to = callsignSSIDToStation(to)
         const from: Station = { callsign: this.config.callsign, ssid: this.config.ssid }
-    
+
         let signature: Buffer = null
         if (sign) {
             if (this.config.signingKey) {
@@ -81,16 +71,15 @@ export class Messenger extends EventEmitter {
         }
 
         const packet: Buffer = await Packet.ToAX25Packet(from, to, message, signature)
-        if (this.tnc == null) throw Error('Error sending message with send(). The Messenger\'s TNC object is null. Are you sure it is connected?')
-        return new Promise((resolve, reject) => {
-            this.tnc.send_data(packet, (err: Error) => {
-                if (err) reject(err)
-                if (this.config.feedbackDebounce) {
-                    this._addToRecentlySent(packet, this.config.feedbackDebounce)
-                }
-                resolve()
-            })
-        })
+        // if (this.tnc == null) throw Error('Error sending message with send(). The Messenger\'s TNC object is null. Are you sure it is connected?')
+
+        return this.tncConnection.sendData(packet, this._handlePostSend.bind(this));
+    }
+
+    private _handlePostSend(data: Buffer): void {
+        if (this.config.feedbackDebounce) {
+            this._addToRecentlySent(data, this.config.feedbackDebounce)
+        }
     }
 
     private async _onAX25DataRecieved(data: any): Promise<void> {
@@ -123,22 +112,14 @@ export class Messenger extends EventEmitter {
         }
 
         const event: MessageEvent = {
-            to: { callsign: packet.to.callsign.trim(), ssid: packet.to.ssid }, 
-            from: { callsign: packet.from.callsign.trim(), ssid: packet.from.ssid }, 
+            to: { callsign: packet.to.callsign.trim(), ssid: packet.to.ssid },
+            from: { callsign: packet.from.callsign.trim(), ssid: packet.from.ssid },
             message: packet.message,
             verification,
             ax25Buffer: data.data
         }
 
         this.emit('message', event)
-    }
-
-    private _createTNC(port: string, baudrate: number): any {
-        const tnc = new KISS_TNC(port, baudrate)
-        // process.on('SIGTERM', tnc.close)
-        tnc.on('error', (error: any) => this.emit('tnc-error', error))
-        tnc.on('data', (data: any) => this._onAX25DataRecieved(data))
-        return tnc
     }
 
     private _addToRecentlySent(buffer: Buffer, expiresIn: number): void {

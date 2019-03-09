@@ -39,7 +39,8 @@
     "command-exists": "^1.2.7",
     "elliptic": "^6.4.1",
     "kiss-tnc": "git+https://github.com/brannondorsey/kiss-tnc.git",
-    "terminal-kit": "^1.26.2"
+    "terminal-kit": "^1.26.2",
+    "utils-for-aprs": "^2.2.9"
   },
   "devDependencies": {
     "@types/argparse": "^1.0.34",
